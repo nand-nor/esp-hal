@@ -9,16 +9,20 @@
 
 use esp_backtrace as _;
 use esp_hal::{
-    clock::ClockControl,
-    gpio::Io,
-    peripherals::Peripherals,
-    prelude::*,
-    reset::software_reset,
-    system::SystemControl,
-    uart::Uart,
+    clock::ClockControl, gpio::Io, peripherals::Peripherals, prelude::*, reset::software_reset,
+    system::SystemControl, uart::Uart,
 };
 use esp_ieee802154::*;
 use esp_println::println;
+
+#[cfg(feature = "lightup-sniffer")]
+use esp_hal_smartled::{smartLedBuffer, SmartLedsAdapter};
+#[cfg(feature = "lightup-sniffer")]
+use smart_leds::{
+    brightness, gamma,
+    SmartLedsWrite,
+    colors,
+};
 
 #[entry]
 fn main() -> ! {
@@ -69,11 +73,44 @@ fn main() -> ! {
         ..Config::default()
     });
 
+    cfg_if::cfg_if! {
+
+        if #[cfg(feature="lightup-sniffer")] {
+
+            // same pin for esp32c6 and esp32h2
+            let led_pin = io.pins.gpio8;
+
+            let hz = if cfg!(feature = "esp32h2"){
+                    32.MHz()
+                } else {
+                    80.MHz()
+            };
+            let rmt = esp_hal::rmt::Rmt::new(peripherals.RMT, hz, &clocks, None).unwrap();
+
+            let rmt_buffer = smartLedBuffer!(1);
+            let mut led = SmartLedsAdapter::new(rmt.channel0, led_pin, rmt_buffer, &clocks);
+            let mut data;
+        }
+    }
+
     ieee802154.start_receive();
 
     loop {
         if let Some(frame) = ieee802154.get_raw_received() {
+            #[cfg(feature = "lightup-sniffer")]
+            {
+                data = [colors::MINT_CREAM];
+                led.write(brightness(gamma(data.iter().cloned()), 10))
+                    .unwrap();
+            }
+
             println!("@RAW {:02x?}", &frame.data);
+            #[cfg(feature = "lightup-sniffer")]
+            {
+                data = [colors::TEAL];
+                led.write(brightness(gamma(data.iter().cloned()), 20))
+                    .unwrap();
+            }
         }
 
         if let nb::Result::Ok(c) = uart0.read_byte() {
